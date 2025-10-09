@@ -14,7 +14,28 @@ class RadioPlayer {
         this.clockInterval = null;
         this.fadeInterval = null;
         
-        this.init();
+        // Aguarda inicialização do Supabase antes de iniciar
+        this.waitForSupabase();
+    }
+
+    async waitForSupabase() {
+        // Aguarda até 10 segundos pelo Supabase
+        let attempts = 0;
+        const maxAttempts = 20;
+        
+        const checkSupabase = async () => {
+            if (window.supabaseManager && window.supabaseManager.initialized) {
+                await this.init();
+            } else if (attempts < maxAttempts) {
+                attempts++;
+                setTimeout(checkSupabase, 500);
+            } else {
+                Logger.error('Supabase não inicializou a tempo, usando modo offline');
+                await this.init();
+            }
+        };
+        
+        checkSupabase();
     }
 
     async init() {
@@ -125,6 +146,12 @@ class RadioPlayer {
 
     async loadInitialPlaylist() {
         try {
+            if (!window.supabaseManager || !window.supabaseManager.initialized) {
+                Logger.warn('Supabase não disponível, usando playlist de demonstração');
+                this.loadFallbackContent();
+                return;
+            }
+
             // Carrega músicas, propagandas e avisos
             const [musics, ads, announcements] = await Promise.all([
                 supabaseManager.getPlaylist(CONFIG.contentTypes.MUSIC),
@@ -205,7 +232,7 @@ class RadioPlayer {
     async playNext() {
         try {
             // Verifica se é hora certa
-            if (await this.checkAndPlayTimAnnouncement()) {
+            if (await this.checkAndPlayTimeAnnouncement()) {
                 return;
             }
 
@@ -228,6 +255,10 @@ class RadioPlayer {
 
         // Toca hora certa no início de cada hora
         if (CONFIG.programming.playTimeAnnouncement && minutes === 0 && seconds < 10) {
+            if (!window.supabaseManager || !window.supabaseManager.initialized) {
+                return false;
+            }
+            
             const timeAnnouncement = await supabaseManager.getContentWithFallback(CONFIG.contentTypes.TIME);
             
             if (timeAnnouncement) {
@@ -268,9 +299,11 @@ class RadioPlayer {
                 this.totalSongsPlayed++;
                 this.updateStats();
 
-                // Salva no histórico do banco
-                const listeners = await supabaseManager.getActiveListeners();
-                await supabaseManager.addToHistory(this.currentTrack.id, listeners);
+                // Salva no histórico do banco (se disponível)
+                if (window.supabaseManager && window.supabaseManager.initialized) {
+                    const listeners = await supabaseManager.getActiveListeners();
+                    await supabaseManager.addToHistory(this.currentTrack.id, listeners);
+                }
             }
 
             this.updateUpcomingList();
@@ -328,17 +361,29 @@ class RadioPlayer {
     }
 
     async updateListenerCount() {
+        if (!window.supabaseManager || !window.supabaseManager.initialized) {
+            document.getElementById('listeners-count').textContent = '1';
+            return;
+        }
+        
         const count = await supabaseManager.getActiveListeners();
         document.getElementById('listeners-count').textContent = count;
     }
 
     startListenerTracking() {
+        if (!window.supabaseManager || !window.supabaseManager.initialized) {
+            this.updateListenerCount();
+            return;
+        }
+        
         // Atualiza presença do listener
         supabaseManager.updateListener(this.sessionId);
         
         // Atualiza a cada 30 segundos
         this.listenerInterval = setInterval(async () => {
-            await supabaseManager.updateListener(this.sessionId);
+            if (window.supabaseManager && window.supabaseManager.initialized) {
+                await supabaseManager.updateListener(this.sessionId);
+            }
             await this.updateListenerCount();
         }, 30000);
 
@@ -390,6 +435,10 @@ class RadioPlayer {
     }
 
     setupRealtimeUpdates() {
+        if (!window.supabaseManager || !window.supabaseManager.initialized) {
+            return;
+        }
+        
         // Escuta mudanças na playlist
         supabaseManager.subscribeToUpdates((payload) => {
             Logger.info('Playlist atualizada:', payload);
