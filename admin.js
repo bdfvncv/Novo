@@ -64,7 +64,7 @@ class AdminPanel {
 
     async checkAuthentication() {
         // Em produção, implemente autenticação real
-        // Por enquanto, usa prompt simples
+        // Por enquanto, usa localStorage
         const isAdmin = localStorage.getItem('isAdmin');
         
         if (isAdmin === 'true') {
@@ -165,6 +165,11 @@ class AdminPanel {
         this.uploadSection.appendChild(progressDiv);
 
         try {
+            // Verifica se cloudinaryUploader está disponível
+            if (!window.cloudinaryUploader) {
+                throw new Error('Sistema de upload não disponível');
+            }
+
             const results = await cloudinaryUploader.uploadMultiple(
                 this.uploadQueue,
                 this.currentUploadType,
@@ -178,7 +183,7 @@ class AdminPanel {
             const successful = results.filter(r => r.success).length;
             const failed = results.filter(r => !r.success).length;
 
-            alert(`Upload concluído!\n✓ Sucesso: ${successful}\n✗ Falhas: ${failed}`);
+            alert(`Upload concluído!\n✔ Sucesso: ${successful}\n✗ Falhas: ${failed}`);
             
             // Limpa e reseta
             this.uploadQueue = [];
@@ -193,6 +198,7 @@ class AdminPanel {
         } catch (error) {
             Logger.error('Erro no upload:', error);
             alert('Erro ao fazer upload. Verifique o console para mais detalhes.');
+            progressDiv.remove();
         } finally {
             uploadBtn.disabled = false;
             uploadBtn.textContent = 'Confirmar Upload';
@@ -206,6 +212,12 @@ class AdminPanel {
         this.playlistView.innerHTML = '<div class="loading">Carregando playlist...</div>';
 
         try {
+            // Verifica se supabaseManager está disponível
+            if (!window.supabaseManager || !window.supabaseManager.initialized) {
+                this.playlistView.innerHTML = '<div class="error">Banco de dados não disponível</div>';
+                return;
+            }
+
             const playlist = await supabaseManager.getPlaylist();
             
             if (playlist.length === 0) {
@@ -302,6 +314,11 @@ class AdminPanel {
         }
 
         try {
+            if (!window.supabaseManager || !window.supabaseManager.initialized) {
+                alert('Banco de dados não disponível');
+                return;
+            }
+
             await supabaseManager.deleteFromPlaylist(id);
             alert('Item removido com sucesso!');
             this.showPlaylist(); // Recarrega lista
@@ -339,6 +356,11 @@ class AdminPanel {
     // Estatísticas avançadas
     async showStatistics() {
         try {
+            if (!window.supabaseManager || !window.supabaseManager.initialized) {
+                alert('Banco de dados não disponível');
+                return;
+            }
+
             const stats = {
                 totalSongs: await supabaseManager.getPlaylist(CONFIG.contentTypes.MUSIC),
                 totalAds: await supabaseManager.getPlaylist(CONFIG.contentTypes.AD),
@@ -383,6 +405,11 @@ class AdminPanel {
     // Export/Import da playlist
     async exportPlaylist() {
         try {
+            if (!window.supabaseManager || !window.supabaseManager.initialized) {
+                alert('Banco de dados não disponível');
+                return;
+            }
+
             const playlist = await supabaseManager.getPlaylist();
             const dataStr = JSON.stringify(playlist, null, 2);
             const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
@@ -397,127 +424,3 @@ class AdminPanel {
             Logger.error('Erro ao exportar playlist:', error);
         }
     }
-}
-
-// Adiciona estilos para o progress bar
-const style = document.createElement('style');
-style.textContent = `
-    .upload-progress {
-        margin-top: 20px;
-    }
-    .progress-bar {
-        width: 100%;
-        height: 20px;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 10px;
-        overflow: hidden;
-    }
-    .progress-fill {
-        height: 100%;
-        background: linear-gradient(90deg, #ff6b6b, #ffd93d);
-        width: 0%;
-        transition: width 0.3s ease;
-    }
-    .progress-text {
-        text-align: center;
-        margin-top: 10px;
-        font-size: 0.9rem;
-    }
-    .playlist-container {
-        max-height: 500px;
-        overflow-y: auto;
-    }
-    .playlist-section {
-        margin-bottom: 30px;
-    }
-    .playlist-section h4 {
-        margin-bottom: 15px;
-        font-size: 1.2rem;
-    }
-    .playlist-item {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 10px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 8px;
-        margin-bottom: 10px;
-    }
-    .playlist-item:hover {
-        background: rgba(255, 255, 255, 0.1);
-    }
-    .item-info {
-        flex: 1;
-    }
-    .item-title {
-        font-weight: 600;
-    }
-    .item-artist {
-        font-size: 0.9rem;
-        opacity: 0.8;
-    }
-    .item-meta {
-        font-size: 0.8rem;
-        opacity: 0.6;
-        margin-top: 5px;
-    }
-    .item-actions {
-        display: flex;
-        gap: 10px;
-    }
-    .btn-small {
-        padding: 5px 10px;
-        border: none;
-        border-radius: 5px;
-        cursor: pointer;
-        background: rgba(255, 255, 255, 0.1);
-        color: white;
-    }
-    .btn-small:hover {
-        background: rgba(255, 255, 255, 0.2);
-    }
-    .btn-danger {
-        background: rgba(255, 59, 59, 0.3);
-    }
-    .btn-danger:hover {
-        background: rgba(255, 59, 59, 0.5);
-    }
-    .playlist-stats {
-        margin-top: 20px;
-        padding-top: 20px;
-        border-top: 1px solid rgba(255, 255, 255, 0.2);
-        display: flex;
-        justify-content: space-between;
-    }
-    .stats-dashboard {
-        margin-top: 30px;
-        padding: 20px;
-        background: rgba(255, 255, 255, 0.05);
-        border-radius: 10px;
-    }
-    .stats-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-        gap: 20px;
-        margin-top: 20px;
-    }
-    .stat-box {
-        text-align: center;
-        padding: 15px;
-        background: rgba(255, 255, 255, 0.1);
-        border-radius: 8px;
-    }
-    .stat-number {
-        font-size: 2rem;
-        font-weight: bold;
-    }
-    .stat-label {
-        font-size: 0.9rem;
-        opacity: 0.8;
-        margin-top: 5px;
-    }
-`;
-document.head.appendChild(style);
-
-// Inicializa o painel admin
-const adminPanel = new AdminPanel();
