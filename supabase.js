@@ -12,92 +12,57 @@ class SupabaseManager {
             await this.loadSupabaseScript();
             
             // Inicializa o cliente
-            this.supabase = window.supabase.createClient(
-                CONFIG.supabase.url,
-                CONFIG.supabase.anonKey
-            );
+            if (window.supabase && window.supabase.createClient) {
+                this.supabase = window.supabase.createClient(
+                    CONFIG.supabase.url,
+                    CONFIG.supabase.anonKey
+                );
 
-            // Cria as tabelas se não existirem
-            await this.createTables();
+                // Verifica conexão
+                const { data, error } = await this.supabase.from('playlist').select('count');
+                
+                if (!error) {
+                    this.initialized = true;
+                    Logger.info('Supabase inicializado com sucesso');
+                } else {
+                    Logger.error('Erro ao conectar com Supabase:', error);
+                    this.initialized = false;
+                }
+            } else {
+                throw new Error('Supabase client não carregado');
+            }
             
-            this.initialized = true;
-            Logger.info('Supabase inicializado com sucesso');
         } catch (error) {
             Logger.error('Erro ao inicializar Supabase:', error);
+            this.initialized = false;
         }
     }
 
     loadSupabaseScript() {
         return new Promise((resolve, reject) => {
-            if (window.supabase) {
+            if (window.supabase && window.supabase.createClient) {
                 resolve();
                 return;
             }
 
             const script = document.createElement('script');
             script.src = 'https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2';
-            script.onload = resolve;
+            script.onload = () => {
+                // Aguarda um pouco para o script ser processado
+                setTimeout(resolve, 100);
+            };
             script.onerror = reject;
             document.head.appendChild(script);
         });
     }
 
-    async createTables() {
-        try {
-            // Nota: Em produção, você deve criar estas tabelas via dashboard do Supabase
-            // Este é apenas um exemplo da estrutura necessária
-            
-            Logger.info('Tabelas verificadas/criadas com sucesso');
-            
-            // Estrutura sugerida das tabelas:
-            /*
-            
-            CREATE TABLE IF NOT EXISTS playlist (
-                id SERIAL PRIMARY KEY,
-                title VARCHAR(255) NOT NULL,
-                artist VARCHAR(255),
-                url TEXT NOT NULL,
-                type VARCHAR(50) NOT NULL,
-                duration INTEGER,
-                cloudinary_public_id VARCHAR(255),
-                created_at TIMESTAMP DEFAULT NOW(),
-                play_count INTEGER DEFAULT 0,
-                active BOOLEAN DEFAULT true
-            );
-
-            CREATE TABLE IF NOT EXISTS schedule (
-                id SERIAL PRIMARY KEY,
-                playlist_id INTEGER REFERENCES playlist(id),
-                scheduled_time TIME,
-                day_of_week INTEGER,
-                priority INTEGER DEFAULT 0,
-                created_at TIMESTAMP DEFAULT NOW()
-            );
-
-            CREATE TABLE IF NOT EXISTS play_history (
-                id SERIAL PRIMARY KEY,
-                playlist_id INTEGER REFERENCES playlist(id),
-                played_at TIMESTAMP DEFAULT NOW(),
-                listeners INTEGER DEFAULT 0
-            );
-
-            CREATE TABLE IF NOT EXISTS listeners (
-                id SERIAL PRIMARY KEY,
-                session_id VARCHAR(255) UNIQUE,
-                started_at TIMESTAMP DEFAULT NOW(),
-                last_seen TIMESTAMP DEFAULT NOW(),
-                total_time INTEGER DEFAULT 0
-            );
-
-            */
-            
-        } catch (error) {
-            Logger.error('Erro ao criar tabelas:', error);
-        }
-    }
-
     // Métodos para gerenciar playlist
     async addToPlaylist(item) {
+        if (!this.initialized || !this.supabase) {
+            Logger.error('Supabase não inicializado');
+            return null;
+        }
+
         try {
             const { data, error } = await this.supabase
                 .from('playlist')
@@ -114,6 +79,11 @@ class SupabaseManager {
     }
 
     async getPlaylist(type = null) {
+        if (!this.initialized || !this.supabase) {
+            Logger.warn('Supabase não disponível, retornando lista vazia');
+            return [];
+        }
+
         try {
             let query = this.supabase
                 .from('playlist')
@@ -135,6 +105,10 @@ class SupabaseManager {
     }
 
     async getNextTrack(type = CONFIG.contentTypes.MUSIC) {
+        if (!this.initialized || !this.supabase) {
+            return this.getDefaultContent(type);
+        }
+
         try {
             const { data, error } = await this.supabase
                 .from('playlist')
@@ -159,30 +133,34 @@ class SupabaseManager {
     }
 
     async updatePlayCount(id) {
+        if (!this.initialized || !this.supabase) {
+            return;
+        }
+
         try {
-            const { error } = await this.supabase.rpc('increment_play_count', { 
-                row_id: id 
-            });
-            
-            if (error) throw error;
-        } catch (error) {
-            // Fallback se a função RPC não existir
-            const { data } = await this.supabase
+            // Primeiro tenta buscar o play_count atual
+            const { data: currentData } = await this.supabase
                 .from('playlist')
                 .select('play_count')
                 .eq('id', id)
                 .single();
                 
-            if (data) {
+            if (currentData) {
                 await this.supabase
                     .from('playlist')
-                    .update({ play_count: (data.play_count || 0) + 1 })
+                    .update({ play_count: (currentData.play_count || 0) + 1 })
                     .eq('id', id);
             }
+        } catch (error) {
+            Logger.error('Erro ao atualizar play count:', error);
         }
     }
 
     async addToHistory(playlistId, listeners = 0) {
+        if (!this.initialized || !this.supabase) {
+            return;
+        }
+
         try {
             const { error } = await this.supabase
                 .from('play_history')
@@ -198,6 +176,10 @@ class SupabaseManager {
     }
 
     async updateListener(sessionId) {
+        if (!this.initialized || !this.supabase) {
+            return;
+        }
+
         try {
             const { data, error } = await this.supabase
                 .from('listeners')
@@ -215,6 +197,10 @@ class SupabaseManager {
     }
 
     async getActiveListeners() {
+        if (!this.initialized || !this.supabase) {
+            return 1; // Retorna pelo menos 1 (o usuário atual)
+        }
+
         try {
             // Considera ativo quem foi visto nos últimos 5 minutos
             const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000).toISOString();
@@ -233,6 +219,10 @@ class SupabaseManager {
     }
 
     async getScheduledContent(hour) {
+        if (!this.initialized || !this.supabase) {
+            return [];
+        }
+
         try {
             const { data, error } = await this.supabase
                 .from('schedule')
@@ -251,6 +241,11 @@ class SupabaseManager {
     }
 
     async deleteFromPlaylist(id) {
+        if (!this.initialized || !this.supabase) {
+            Logger.error('Supabase não inicializado');
+            return;
+        }
+
         try {
             const { error } = await this.supabase
                 .from('playlist')
@@ -267,14 +262,18 @@ class SupabaseManager {
     // Busca de conteúdo com fallback para dados locais
     async getContentWithFallback(type) {
         try {
-            let content = await this.getNextTrack(type);
-            
-            // Se não houver conteúdo no banco, usa conteúdo padrão
-            if (!content) {
-                content = this.getDefaultContent(type);
+            if (this.initialized && this.supabase) {
+                let content = await this.getNextTrack(type);
+                
+                // Se não houver conteúdo no banco, usa conteúdo padrão
+                if (!content) {
+                    content = this.getDefaultContent(type);
+                }
+                
+                return content;
+            } else {
+                return this.getDefaultContent(type);
             }
-            
-            return content;
         } catch (error) {
             Logger.error('Erro ao buscar conteúdo:', error);
             return this.getDefaultContent(type);
@@ -319,20 +318,35 @@ class SupabaseManager {
 
     // Realtime subscriptions
     subscribeToUpdates(callback) {
-        const subscription = this.supabase
-            .channel('playlist_changes')
-            .on(
-                'postgres_changes',
-                { event: '*', schema: 'public', table: 'playlist' },
-                callback
-            )
-            .subscribe();
+        if (!this.initialized || !this.supabase) {
+            Logger.warn('Supabase não disponível para inscrições realtime');
+            return null;
+        }
 
-        return subscription;
+        try {
+            const channel = this.supabase.channel('playlist_changes');
+            
+            channel
+                .on(
+                    'postgres_changes',
+                    { event: '*', schema: 'public', table: 'playlist' },
+                    callback
+                )
+                .subscribe((status) => {
+                    if (status === 'SUBSCRIBED') {
+                        Logger.info('Inscrito em mudanças da playlist');
+                    }
+                });
+
+            return channel;
+        } catch (error) {
+            Logger.error('Erro ao configurar realtime:', error);
+            return null;
+        }
     }
 
     unsubscribe(subscription) {
-        if (subscription) {
+        if (subscription && this.supabase) {
             this.supabase.removeChannel(subscription);
         }
     }
